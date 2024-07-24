@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fx Wars</title>
+    <link rel="icon" href="https://georgeazma.github.io/fx-wars/favicon.webp">
     <style>
         body {
             padding: 0;
@@ -29,60 +30,72 @@
     <script type="module">
         import Shader from "./shader.js"
 
-        async function loadFileAsString(url) {
-            const response = await fetch(url);
-            const text = await response.text();
-            return text;
-        }
+        document.addEventListener('DOMContentLoaded', async function () {
 
-        const smoothing = 0.6;
-        let oldPoints = new Float32Array(42 * 3);
-        oldPoints.fill(-1.0);
-        let oldWorldPoints = new Float32Array(42 * 3);
-        oldWorldPoints.fill(-1.0);
+            async function loadFileAsString(url) {
+                const response = await fetch(url);
+                const text = await response.text();
+                return text;
+            }
 
-        function expSmoothing(newPoints, oldPoints, alpha) {
-            for (let i = 0; i < newPoints.length; ++i) {
-                if (newPoints[i] >= 0.0 && oldPoints[i] >= 0.0) {
-                    oldPoints[i] = alpha * oldPoints[i] + (1.0 - alpha) * newPoints[i];
-                } else {
-                    oldPoints[i] = newPoints[i];
+            const smoothing = 0.6;
+            let oldPoints = new Float32Array(42 * 3);
+            oldPoints.fill(-1.0);
+            let oldWorldPoints = new Float32Array(42 * 3);
+            oldWorldPoints.fill(-1.0);
+
+            function expSmoothing(newPoints, oldPoints, alpha) {
+                for (let i = 0; i < newPoints.length; ++i) {
+                    if (newPoints[i] >= 0.0 && oldPoints[i] >= 0.0) {
+                        oldPoints[i] = alpha * oldPoints[i] + (1.0 - alpha) * newPoints[i];
+                    } else {
+                        oldPoints[i] = newPoints[i];
+                    }
                 }
             }
-        }
 
-        function np(p) {
-            return { x: oldWorldPoints[p * 3 + 0], y: oldWorldPoints[p * 3 + 1], z: oldWorldPoints[p * 3 + 2] };
-        }
+            function np(p) {
+                return { x: oldWorldPoints[p * 3 + 0], y: oldWorldPoints[p * 3 + 1], z: oldWorldPoints[p * 3 + 2] };
+            }
 
-        function dist(a, b) {
-            return Math.sqrt((np(a).x - np(b).x) ** 2 + (np(a).y - np(b).y) ** 2 + (np(a).z - np(b).z) ** 2);
-        }
+            function dist(a, b) {
+                return Math.sqrt((np(a).x - np(b).x) ** 2 + (np(a).y - np(b).y) ** 2 + (np(a).z - np(b).z) ** 2);
+            }
 
-        function fist(right = false) {
-            const i = right ? 21 : 0;
-            return (0.42 - (dist(10 + i, 4 + i) + dist(5 + i, 8 + i) + dist(9 + i, 12 + i) + dist(13 + i, 16 + i) + dist(17 + i, 20 + i))) * 3.4;
-        }
+            function fist(right = false) {
+                const i = right ? 21 : 0;
+                return (0.42 - (dist(10 + i, 4 + i) + dist(5 + i, 8 + i) + dist(9 + i, 12 + i) + dist(13 + i, 16 + i) + dist(17 + i, 20 + i))) * 3.4;
+            }
 
-        function curl(p /* finger tip index */) {
-            let a = np(p);
-            let b = np(p - 2);
-            const c = np(p - 1);
-            a.x -= c.x; a.y -= c.y; a.z -= c.z;
-            b.x -= c.x; b.y -= c.y; b.z -= c.z;
-            const d = (a.x * b.x + a.y * b.y + a.z * b.z) / (dist(p - 1, p) * dist(p - 1, p - 2) * 1.001);
-            return Math.acos(d) / Math.PI;
-        }
+            function curl(p /* finger tip index */) {
+                let a = np(p);
+                let b = np(p - 2);
+                const c = np(p - 1);
+                a.x -= c.x; a.y -= c.y; a.z -= c.z;
+                b.x -= c.x; b.y -= c.y; b.z -= c.z;
+                const d = (a.x * b.x + a.y * b.y + a.z * b.z) / (dist(p - 1, p) * dist(p - 1, p - 2) * 1.001);
+                return Math.acos(d) / Math.PI;
+            }
 
-        function handCurl(right = false) {
-            return (9.5 - (curl(3) + curl(4) + curl(7) + curl(8) + curl(11) + curl(12) + curl(15) + curl(16) + curl(19) + curl(20))) * 0.25;
-        }
+            function handCurl(right = false) {
+                return (9.5 - (curl(3) + curl(4) + curl(7) + curl(8) + curl(11) + curl(12) + curl(15) + curl(16) + curl(19) + curl(20))) * 0.25;
+            }
 
-        document.addEventListener('DOMContentLoaded', async function () {
             try {
+                const cameras = await navigator.mediaDevices.enumerateDevices();
+                let cameraId = ""
+                for (const camera of cameras) {
+                    if (camera.kind === "videoinput") {
+                        cameraId = camera.deviceId;
+                        if (camera.label === "OBS Virtual Camera") {
+                            console.log("Using Front Camera: " + camera.label);
+                            break;
+                        }
+                    }
+                }
                 const stream = await navigator.mediaDevices.getUserMedia({
                     // "user" = front, "environment" = back camera | deviceId for OBS Virtual Camera
-                    video: { facingMode: "user", deviceId: "7052f52a89c63606ec46754a87ce163e55a318ba9c8084a2c0a4d75a91cbf37d" }
+                    video: { facingMode: "user", deviceId: cameraId }
                 });
                 const video = document.getElementById("front-camera");
                 video.srcObject = stream;
@@ -96,8 +109,8 @@
                 hands.setOptions({
                     maxNumHands: 2,
                     modelComplexity: 1,
-                    minDetectionConfidence: 0.3,
-                    minTrackingConfidence: 0.01
+                    minDetectionConfidence: 0.6,
+                    minTrackingConfidence: 0.2
                 });
 
                 hands.onResults((results) => {
@@ -127,8 +140,8 @@
                     shader.points.set(oldPoints);
                 });
 
-                const smallCanvas = document.createElement('canvas', { willReadFrequently: true });
-                const smallContext = smallCanvas.getContext('2d');
+                const smallCanvas = document.createElement('canvas');
+                const smallContext = smallCanvas.getContext('2d', { willReadFrequently: true });
 
                 function getBrightness(video) {
                     smallCanvas.width = video.videoWidth / 8;
@@ -152,7 +165,7 @@
                 }
 
                 const include = await loadFileAsString("shaders/include.glsl");
-                const shader = new Shader(canvas, video, '', include + await loadFileAsString('shaders/strings.frag'));
+                const shader = new Shader(canvas, video, '', include + await loadFileAsString('shaders/lightning.frag'));
 
                 video.addEventListener('loadedmetadata', () => {
                     const canvas = document.getElementById("canvas");

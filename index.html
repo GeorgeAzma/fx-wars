@@ -170,7 +170,7 @@
                 }
 
                 const include = await loadFileAsString("shaders/include.glsl");
-                const shader = new Shader(canvas, video, '', include + await loadFileAsString('shaders/lightning.frag'));
+                const shader = new Shader(canvas, video, '', include + await loadFileAsString('shaders/strings.frag'));
 
                 video.removeEventListener('loadedmetadata', () => { });
                 video.addEventListener('loadedmetadata', () => {

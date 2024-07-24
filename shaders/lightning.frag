@@ -25,7 +25,7 @@ float noise(vec2 p) {
 		mix(hash12(i + vec2(0, 1)), hash12(i + vec2(1)), f.x), f.y);
 	return res;	
 }
-
+  
 float fbm(vec2 p) {
 	float s = 0.0, m = 0.0, a = 1.0;
 	for(int i = 0; i < 6; i++) {
@@ -36,7 +36,7 @@ float fbm(vec2 p) {
 	}
 	return s / m;
 }
-
+   
 float lightning(vec2 uv, float i) {
     // Expanding / Warping
     float n = fract(noise11(i * 3.0) * 3.0) * 2.0 - 1.0;

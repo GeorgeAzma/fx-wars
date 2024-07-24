@@ -24,20 +24,6 @@ void main() {
     vec3 c = texture2D(video, vec2(uv.x, uv.y)).rgb;
     float f = 1.0 / min(resolution.x, resolution.y);
 
-    // Points
-    // for (int i = 0; i < 42; ++i)
-    //     c = mix(c, vec3(1), smoothstep(f, 0.0, distance(uv, points[i].xy) - 0.005));
-    
-    // Web
-    // for (int i = 0; i < 41; ++i) {
-    //     vec2 a = normalize(uv - points[i].xy);
-    //     float an = noise11(time * 0.01 + float(i) * 33.618) * 111.0;
-    //     a = cos(an) * a + sin(an) * vec2(-a.y, a.x);
-    //     vec2 b = normalize(points[i + 1].xy - points[i].xy);
-    //     c = mix(c, vec3(1), smoothstep(f / distance(uv, points[i].xy), 0.0, abs(dot(a, b)) - 0.005) * max(0.0, 1.0 - 3.0 * distance(points[i].xy, uv)));
-    // }
-
-    // Strings
     for (int i = 0; i < 21; ++i) {
         if (points[i].x > -0.1 && points[i + 21].x > -0.1) {
             float id = float(i * 100);

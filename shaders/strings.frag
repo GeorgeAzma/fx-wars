@@ -18,10 +18,12 @@ float segment(vec2 p, vec2 a, vec2 b) {
     return length(pa - ba * h);
 }
 
+#define p(i) (((points[i]) * 2.0 - 1.0) * vec3(-resolution.x / resolution.y, 1, 1))
+
 void main() {
     vec2 uv = gl_FragCoord.xy / resolution;
     uv.y = 1.0 - uv.y;
-    vec3 c = texture2D(video, uv).rgb;
+    vec3 c = texture(video, uv).rgb;
     float f = 1.0 / min(resolution.x, resolution.y);
 
     for (int i = 0; i < 21; ++i) {
@@ -36,5 +38,5 @@ void main() {
                 smoothstep(f, 0.0, segment(v, points[i].xy, points[i + 21].xy) - abs(0.0014 - 0.0022 * noise11(d1 * 70.0 + id))) * noise11(d1 * 70.0 + id));
         }
     }
-    gl_FragColor = vec4(c, 1);
+    fragColor = vec4(c, 1);
 }

@@ -1,22 +1,21 @@
+import { HANDS } from "./settings.js"
+
 export default class Shader {
     frag = '';
-    vert = '';
   
-    canvas;
-    texture;
-    video;
+    canvas = null;
+    texture = null;
+    video = null;
     brightness = 1.0;
-    points = new Float32Array(42 * 3).fill(-1.0);
+    points = new Float32Array(21 * HANDS * 3).fill(-1.0);
     program = null;
     gl = null;
+    vs = null;
     start = performance.now();
-    vertices = [-1, -1, 1, -1, -1, 1, 1, 1];
-    vertexBuffer = null;
   
-    constructor(canvas, video, vert, frag) {
+    constructor(canvas, video, frag) {
       this.canvas = canvas;
       this.video = video;
-      this.vert = vert;
       this.frag = frag;
       this.gl = this.canvas.getContext('webgl2', { willReadFrequently: true });
       this.texture = this.gl.createTexture();
@@ -29,17 +28,26 @@ export default class Shader {
         console.error('WebGL is not supported in this browser.');
         return;
       }
-    //   this.gl.blendFuncSeparate(
-    //     this.gl.SRC_ALPHA, this.gl.ONE_MINUS_SRC_ALPHA,
-    //     this.gl.ONE, this.gl.ONE_MINUS_SRC_ALPHA
-    //   );
-    //   this.gl.enable(this.gl.BLEND);
-      this.vertexBuffer = this.gl.createBuffer();
-      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.vertexBuffer);
-      this.gl.bufferData(this.gl.ARRAY_BUFFER, new Float32Array(this.vertices), this.gl.STATIC_DRAW);
       this.start = performance.now();
   
-      this.onShaderChange(this.vert, this.frag);
+      this.vs = this.gl.createShader(this.gl.VERTEX_SHADER);
+      if (!this.vs) {
+        alert('Could not create vertex shader');
+        return;
+      }
+      this.gl.shaderSource(this.vs, `#version 300 es 
+      precision mediump float;
+      void main() {
+        vec2 vertices[3]=vec2[3](vec2(-1,-1), vec2(3,-1), vec2(-1, 3));
+        gl_Position = vec4(vertices[gl_VertexID],0,1);
+      }`);
+      this.gl.compileShader(this.vs);
+      if (!this.gl.getShaderParameter(this.vs, this.gl.COMPILE_STATUS)) {
+        const errorLog = this.gl.getShaderInfoLog(this.vs);
+        console.error('Vertex shader compilation error:', errorLog);
+      }
+  
+      this.onShaderChange(this.frag);
     }
   
     resizeCanvas() {
@@ -49,31 +57,27 @@ export default class Shader {
       this.canvas.width = this.canvas.offsetWidth;
       this.canvas.height = this.canvas.offsetHeight;
       if (this.gl && this.program) {
+        this.gl.useProgram(this.program);
         const res = this.gl.getUniformLocation(this.program, 'resolution');
         this.gl.uniform2f(res, this.canvas.width, this.canvas.height);
         this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
       }
     }
   
-    async onShaderChange(vert, frag) {
-      this.vert = vert;
+    async onShaderChange(frag) {
       this.frag = frag;
-      if (!this.frag) this.frag = 'precision mediump float;void main() {gl_FragColor=vec4(1, 0, 1, 1);}';
+      if (!this.frag) this.frag = `#version 300 es 
+      precision mediump float;
+      out vec4 color;
+      void main() {
+      color = vec4(1, 0, 1, 1);
+      }`;
       else {
         this.frag = frag;
         if (this.frag.endsWith(".frag")) {
           let r = await fetch(this.frag);
           let t = await r.text();
           this.frag = t;
-        }
-      }
-      if (!this.vert) this.vert = 'attribute vec4 a_position;void main() {gl_Position = a_position;}';
-      else {
-        this.vert = vert;
-        if (this.vert.endsWith(".vert")) {
-          let r = await fetch(this.vert);
-          let t = await r.text();
-          this.vert = t;
         }
       }
       if (!this.gl) return;
@@ -90,18 +94,6 @@ export default class Shader {
         console.error('Fragment shader compilation error:', errorLog);
       }
   
-      const vs = this.gl.createShader(this.gl.VERTEX_SHADER);
-      if (!vs) {
-        alert('Could not create vertex shader');
-        return;
-      }
-      this.gl.shaderSource(vs, this.vert);
-      this.gl.compileShader(vs);
-      if (!this.gl.getShaderParameter(vs, this.gl.COMPILE_STATUS)) {
-        const errorLog = this.gl.getShaderInfoLog(vs);
-        console.error('Vertex shader compilation error:', errorLog);
-      }
-  
       if (this.program) {
         this.gl.deleteProgram(this.program);
         this.program = null;
@@ -112,18 +104,13 @@ export default class Shader {
         return;
       }
       this.gl.attachShader(this.program, fs);
-      this.gl.attachShader(this.program, vs);
+      this.gl.attachShader(this.program, this.vs);
       this.gl.linkProgram(this.program);
+      if (!this.gl.getProgramParameter(this.program, this.gl.LINK_STATUS)) {
+        const errorLog = this.gl.getProgramInfoLog(this.program);
+        console.error('Program link error:', errorLog);
+      }
       this.gl.deleteShader(fs);
-      this.gl.deleteShader(vs);
-  
-      this.gl.useProgram(this.program);
-      const positionAttribute = this.gl.getAttribLocation(this.program, 'a_position');
-      this.gl.enableVertexAttribArray(positionAttribute);
-      this.gl.vertexAttribPointer(positionAttribute, 2, this.gl.FLOAT, false, 0, 0);
-
-      const video_location = this.gl.getUniformLocation(this.program, 'video');
-      this.gl.uniform1i(video_location, 0);
   
       this.resizeCanvas();
   
@@ -133,7 +120,6 @@ export default class Shader {
     render() {
       if (!(this.canvas && this.gl && this.program && this.video)) return;
       this.gl.useProgram(this.program);
-      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.vertexBuffer);
       this.gl.bindTexture(this.gl.TEXTURE_2D, this.texture);
       this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, this.gl.RGBA, this.gl.UNSIGNED_BYTE, this.video);
       this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);

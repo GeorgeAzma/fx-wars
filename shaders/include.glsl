@@ -4,7 +4,9 @@ uniform sampler2D video;
 uniform float time;
 uniform float brightness;
 uniform vec2 resolution;
-uniform vec3 points[42];
+uniform vec3 points[21 * HANDS];
+
+out vec4 fragColor;
 
 const float PI = 3.141592653;
 const float TAU = PI * 2.0;

@@ -14,7 +14,7 @@ float noise11(float p) {
 void main() {
     vec2 uv = gl_FragCoord.xy / resolution;
     uv.y = 1.0 - uv.y;
-    vec3 c = texture2D(video, uv).rgb;
+    vec3 c = texture(video, uv).rgb;
     float f = 1.0 / min(resolution.x, resolution.y);
 
     for (int i = 0; i < 41; ++i) {
@@ -25,5 +25,5 @@ void main() {
         c = mix(c, vec3(1), smoothstep(f / distance(uv, points[i].xy), 0.0, abs(dot(a, b)) - 0.005) * max(0.0, 1.0 - 3.0 * distance(points[i].xy, uv)));
     }
 
-    gl_FragColor = vec4(c, 1);
+    fragColor = vec4(c, 1);
 }

@@ -64,30 +64,35 @@ vec3 lightnings(vec2 uv) {
     col = col * 0.7 + 0.7 * vec3(4.0 * md * md + 3.5 * md, 0.3, 0.6) * md * d;
     col = mix(col, col * col, min(1.0, dd * dd * dd * dd));
     col = (col - 0.5) * 0.6 + 0.3;
+    col = clamp(col, vec3(0), vec3(1));
     
     return col;
 }
 
 #define p(i) (((r ? points[i + 21] : points[i]) * 2.0 - 1.0) * vec3(-resolution.x / resolution.y, 1, 1))
 
-void hand(vec2 uv, inout vec3 c, bool r) {
+void hand(vec2 uv, inout vec3 col, bool r) {
     if (p(0).y < -1.01) return;
-    uv += p(9).xy;
-    uv /= pow(p(9).z, 4.0);
-    vec2 p1 = p(9).xy - p(0).xy;
-    float a = (r ? PI : -PI) * 0.63 - atan(p1.y, p1.x);
-    uv = cos(a) * uv + sin(a) * vec2(-uv.y, uv.x);
 
-    // uv.x *= 1.0 + (p(17).x - p(9).x);
+    uv += p(9).xy;
+    
+    // vec3 a = normalize(p(9) - p(0));
+    // vec3 b = normalize(p(17) - p(9));
+    // vec3 c = cross(a, b);
+    // uv.x /= abs(c.x) > abs(c.y) ? c.x : c.y;
+
+    vec2 p1 = p(9).xy - p(0).xy;
+    float an = (r ? PI : -PI) * 0.63 - atan(p1.y, p1.x);
+    uv = cos(an) * uv + sin(an) * vec2(-uv.y, uv.x);
 
     vec3 l = lightnings(uv) * smoothstep(0.3, 0.1, abs(uv.y)) * smoothstep(0.0, 0.1, uv.x);
-    c = mix(c, l, clamp(dot(l, l), 0.0, 1.0));
+    col = mix(col, l, min(dot(l, l), 1.0));
 }
 
 void main() {
     vec2 uv = (gl_FragCoord.xy * 2.0 - resolution) / resolution.y;
-    vec3 c = texture2D(video, vec2(gl_FragCoord.x / resolution.x, 1.0 - gl_FragCoord.y / resolution.y)).rgb;
+    vec3 c = texture(video, vec2(gl_FragCoord.x / resolution.x, 1.0 - gl_FragCoord.y / resolution.y)).rgb;
     hand(uv, c, true);
     hand(uv, c, false);
-    gl_FragColor = vec4(c, 1);
+    fragColor = vec4(c, 1);
 }

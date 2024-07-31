@@ -29,184 +29,173 @@
     <script type="module" src="shader.js"></script>
     <script type="module">
         import Shader from "./shader.js"
+        import { HANDS, SMOOTHING, SHADER, DETECTION_CONFIDENCE, TRACKING_CONFIDENCE } from "./settings.js"
 
         async function loadFileAsString(url) {
             const response = await fetch(url);
             return response.text();
         }
 
-        function stopStream(stream) {
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
+        let oldPoints = new Float32Array(21 * HANDS * 3);
+        oldPoints.fill(-1.0);
+        let oldWorldPoints = new Float32Array(21 * HANDS * 3);
+        oldWorldPoints.fill(-1.0);
+
+        function expSmoothing(newPoints, oldPoints, alpha) {
+            for (let i = 0; i < newPoints.length; ++i) {
+                if (newPoints[i] >= 0.0 && oldPoints[i] >= 0.0) {
+                    oldPoints[i] = alpha * oldPoints[i] + (1.0 - alpha) * newPoints[i];
+                } else {
+                    oldPoints[i] = newPoints[i];
+                }
             }
         }
 
-        window.onload = async function () {
-            const smoothing = 0.6;
-            let oldPoints = new Float32Array(42 * 3);
-            oldPoints.fill(-1.0);
-            let oldWorldPoints = new Float32Array(42 * 3);
-            oldWorldPoints.fill(-1.0);
+        function np(p) {
+            return { x: oldWorldPoints[p * 3 + 0], y: oldWorldPoints[p * 3 + 1], z: oldWorldPoints[p * 3 + 2] };
+        }
 
-            function expSmoothing(newPoints, oldPoints, alpha) {
-                for (let i = 0; i < newPoints.length; ++i) {
-                    if (newPoints[i] >= 0.0 && oldPoints[i] >= 0.0) {
-                        oldPoints[i] = alpha * oldPoints[i] + (1.0 - alpha) * newPoints[i];
+        function dist(a, b) {
+            return Math.sqrt((np(a).x - np(b).x) ** 2 + (np(a).y - np(b).y) ** 2 + (np(a).z - np(b).z) ** 2);
+        }
+
+        function fist(right = false) {
+            const i = right ? 21 : 0;
+            return (0.42 - (dist(10 + i, 4 + i) + dist(5 + i, 8 + i) + dist(9 + i, 12 + i) + dist(13 + i, 16 + i) + dist(17 + i, 20 + i))) * 3.4;
+        }
+
+        function curl(p /* finger tip index */) {
+            let a = np(p);
+            let b = np(p - 2);
+            const c = np(p - 1);
+            a.x -= c.x; a.y -= c.y; a.z -= c.z;
+            b.x -= c.x; b.y -= c.y; b.z -= c.z;
+            const d = (a.x * b.x + a.y * b.y + a.z * b.z) / (dist(p - 1, p) * dist(p - 1, p - 2) * 1.001);
+            return Math.acos(d) / Math.PI;
+        }
+
+        function handCurl(right = false) {
+            return (9.5 - (curl(3) + curl(4) + curl(7) + curl(8) + curl(11) + curl(12) + curl(15) + curl(16) + curl(19) + curl(20))) * 0.25;
+        }
+
+        try {
+            const cameras = await navigator.mediaDevices.enumerateDevices();
+            let cameraId = ""
+            let cameraLabel = ""
+            for (const camera of cameras) {
+                if (camera.kind === "videoinput") {
+                    cameraId = camera.deviceId;
+                    cameraLabel = camera.label;
+                    if (camera.label === "OBS Virtual Camera") {
+                        break;
+                    }
+                }
+            }
+            console.log("Using Front Camera: " + cameraLabel);
+            const stream = await navigator.mediaDevices.getUserMedia({
+                // "user" = front, "environment" = back camera | deviceId for OBS Virtual Camera
+                video: { facingMode: "user", deviceId: cameraId }
+            });
+            const video = document.getElementById("front-camera");
+            video.srcObject = stream;
+
+            const hands = new Hands({
+                locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+                }
+            });
+
+            hands.setOptions({
+                maxNumHands: HANDS,
+                modelComplexity: 1,
+                minDetectionConfidence: DETECTION_CONFIDENCE,
+                minTrackingConfidence: TRACKING_CONFIDENCE
+            });
+
+            hands.onResults((results) => {
+                let newPoints = new Float32Array(21 * HANDS * 3);
+                newPoints.fill(-1.0);
+                let newWorldPoints = new Float32Array(21 * HANDS * 3);
+                newWorldPoints.fill(-1.0);
+                if (results.multiHandLandmarks && results.multiHandedness) {
+                    for (let index = 0; index < results.multiHandLandmarks.length; index++) {
+                        const classification = results.multiHandedness[index];
+                        const isRightHand = classification.label === 'Right';
+                        const landmarks = results.multiHandLandmarks[index];
+                        const worldLandmarks = results.multiHandWorldLandmarks[index];
+                        for (let i = 0; i < 21; ++i) {
+                            newPoints[i * 3 + 0 + (isRightHand ? 21 : 0) * 3] = landmarks[i].x;
+                            newPoints[i * 3 + 1 + (isRightHand ? 21 : 0) * 3] = landmarks[i].y;
+                            newPoints[i * 3 + 2 + (isRightHand ? 21 : 0) * 3] = landmarks[i].z;
+
+                            newWorldPoints[i * 3 + 0 + (isRightHand ? 21 : 0) * 3] = worldLandmarks[i].x;
+                            newWorldPoints[i * 3 + 1 + (isRightHand ? 21 : 0) * 3] = worldLandmarks[i].y;
+                            newWorldPoints[i * 3 + 2 + (isRightHand ? 21 : 0) * 3] = worldLandmarks[i].z;
+                        }
+                    }
+                }
+                expSmoothing(newPoints, oldPoints, SMOOTHING);
+                expSmoothing(newWorldPoints, oldWorldPoints, SMOOTHING);
+                shader.points.set(oldPoints);
+            });
+
+            const smallCanvas = document.createElement('canvas');
+            const smallContext = smallCanvas.getContext('2d', { willReadFrequently: true });
+
+            function getBrightness(video) {
+                smallCanvas.width = video.videoWidth / 8;
+                smallCanvas.height = video.videoHeight / 8;
+                smallContext.drawImage(video, 0, 0, smallCanvas.width, smallCanvas.height);
+
+                const imageData = smallContext.getImageData(0, 0, smallCanvas.width, smallCanvas.height);
+                const data = imageData.data;
+                let totalBrightness = 0;
+                const numPixels = data.length / 4;
+
+                for (let i = 0; i < data.length; i += 4) {
+                    const r = data[i];
+                    const g = data[i + 1];
+                    const b = data[i + 2];
+                    const brightness = r * 0.299 + g * 0.587 + b * 0.114;
+                    totalBrightness += brightness;
+                }
+
+                return totalBrightness / numPixels / 255;
+            }
+
+            const include = await loadFileAsString("shaders/include.glsl");
+            const shader = new Shader(canvas, video, '#version 300 es\nconst int HANDS = ' + HANDS + ';\n' + include + await loadFileAsString('shaders/' + SHADER + '.frag'));
+
+            if (video.srcObject && canvas) {
+                const canvas = document.getElementById("canvas");
+                const aspectRatio = video.videoWidth / video.videoHeight;
+                function resizeCanvas() {
+                    const width = window.innerWidth;
+                    const height = window.innerHeight;
+                    if (width / height > aspectRatio) {
+                        canvas.width = height * aspectRatio;
+                        canvas.height = height;
                     } else {
-                        oldPoints[i] = newPoints[i];
+                        canvas.width = width;
+                        canvas.height = width / aspectRatio;
                     }
+                    canvas.style.left = `${(width - canvas.width) / 2}px`;
+                    canvas.style.top = `${(height - canvas.height) / 2}px`;
+                    shader.resizeCanvas();
                 }
+                window.addEventListener('resize', resizeCanvas);
+                resizeCanvas();
             }
-
-            function np(p) {
-                return { x: oldWorldPoints[p * 3 + 0], y: oldWorldPoints[p * 3 + 1], z: oldWorldPoints[p * 3 + 2] };
+            async function render() {
+                await hands.send({ image: video });
+                shader.brightness = getBrightness(video);
+                shader.render();
+                requestAnimationFrame(render);
             }
-
-            function dist(a, b) {
-                return Math.sqrt((np(a).x - np(b).x) ** 2 + (np(a).y - np(b).y) ** 2 + (np(a).z - np(b).z) ** 2);
-            }
-
-            function fist(right = false) {
-                const i = right ? 21 : 0;
-                return (0.42 - (dist(10 + i, 4 + i) + dist(5 + i, 8 + i) + dist(9 + i, 12 + i) + dist(13 + i, 16 + i) + dist(17 + i, 20 + i))) * 3.4;
-            }
-
-            function curl(p /* finger tip index */) {
-                let a = np(p);
-                let b = np(p - 2);
-                const c = np(p - 1);
-                a.x -= c.x; a.y -= c.y; a.z -= c.z;
-                b.x -= c.x; b.y -= c.y; b.z -= c.z;
-                const d = (a.x * b.x + a.y * b.y + a.z * b.z) / (dist(p - 1, p) * dist(p - 1, p - 2) * 1.001);
-                return Math.acos(d) / Math.PI;
-            }
-
-            function handCurl(right = false) {
-                return (9.5 - (curl(3) + curl(4) + curl(7) + curl(8) + curl(11) + curl(12) + curl(15) + curl(16) + curl(19) + curl(20))) * 0.25;
-            }
-
-            try {
-                const cameras = await navigator.mediaDevices.enumerateDevices();
-                let cameraId = ""
-                for (const camera of cameras) {
-                    if (camera.kind === "videoinput") {
-                        cameraId = camera.deviceId;
-                        if (camera.label === "OBS Virtual Camera") {
-                            console.log("Using Front Camera: " + camera.label);
-                            break;
-                        }
-                    }
-                }
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    // "user" = front, "environment" = back camera | deviceId for OBS Virtual Camera
-                    video: { facingMode: "user", deviceId: cameraId }
-                });
-                const video = document.getElementById("front-camera");
-                stopStream(video.srcObject); // Clean up previous stream
-                video.srcObject = stream;
-
-                const hands = new Hands({
-                    locateFile: (file) => {
-                        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-                    }
-                });
-
-                hands.setOptions({
-                    maxNumHands: 2,
-                    modelComplexity: 1,
-                    minDetectionConfidence: 0.6,
-                    minTrackingConfidence: 0.2
-                });
-
-                hands.onResults((results) => {
-                    let newPoints = new Float32Array(42 * 3);
-                    newPoints.fill(-1.0);
-                    let newWorldPoints = new Float32Array(42 * 3);
-                    newWorldPoints.fill(-1.0);
-                    if (results.multiHandLandmarks && results.multiHandedness) {
-                        for (let index = 0; index < results.multiHandLandmarks.length; index++) {
-                            const classification = results.multiHandedness[index];
-                            const isRightHand = classification.label === 'Right';
-                            const landmarks = results.multiHandLandmarks[index];
-                            const worldLandmarks = results.multiHandWorldLandmarks[index];
-                            for (let i = 0; i < 21; ++i) {
-                                newPoints[i * 3 + 0 + (isRightHand ? 21 : 0) * 3] = landmarks[i].x;
-                                newPoints[i * 3 + 1 + (isRightHand ? 21 : 0) * 3] = landmarks[i].y;
-                                newPoints[i * 3 + 2 + (isRightHand ? 21 : 0) * 3] = landmarks[i].z;
-
-                                newWorldPoints[i * 3 + 0 + (isRightHand ? 21 : 0) * 3] = worldLandmarks[i].x;
-                                newWorldPoints[i * 3 + 1 + (isRightHand ? 21 : 0) * 3] = worldLandmarks[i].y;
-                                newWorldPoints[i * 3 + 2 + (isRightHand ? 21 : 0) * 3] = worldLandmarks[i].z;
-                            }
-                        }
-                    }
-                    expSmoothing(newPoints, oldPoints, smoothing);
-                    expSmoothing(newWorldPoints, oldWorldPoints, smoothing);
-                    shader.points.set(oldPoints);
-                });
-
-                const smallCanvas = document.createElement('canvas');
-                const smallContext = smallCanvas.getContext('2d', { willReadFrequently: true });
-
-                function getBrightness(video) {
-                    smallCanvas.width = video.videoWidth / 8;
-                    smallCanvas.height = video.videoHeight / 8;
-                    smallContext.drawImage(video, 0, 0, smallCanvas.width, smallCanvas.height);
-
-                    const imageData = smallContext.getImageData(0, 0, smallCanvas.width, smallCanvas.height);
-                    const data = imageData.data;
-                    let totalBrightness = 0;
-                    const numPixels = data.length / 4;
-
-                    for (let i = 0; i < data.length; i += 4) {
-                        const r = data[i];
-                        const g = data[i + 1];
-                        const b = data[i + 2];
-                        const brightness = r * 0.299 + g * 0.587 + b * 0.114;
-                        totalBrightness += brightness;
-                    }
-
-                    return totalBrightness / numPixels / 255;
-                }
-
-                const include = await loadFileAsString("shaders/include.glsl");
-                const shader = new Shader(canvas, video, '', include + await loadFileAsString('shaders/web.frag'));
-
-                video.removeEventListener('loadedmetadata', () => { });
-                video.addEventListener('loadedmetadata', () => {
-                    const canvas = document.getElementById("canvas");
-                    canvas.width = video.videoWidth;
-                    canvas.height = video.videoHeight;
-                    const aspectRatio = video.videoWidth / video.videoHeight;
-                    function resizeCanvas() {
-                        const width = window.innerWidth;
-                        const height = window.innerHeight;
-                        if (width / height > aspectRatio) {
-                            canvas.width = height * aspectRatio;
-                            canvas.height = height;
-                        } else {
-                            canvas.width = width;
-                            canvas.height = width / aspectRatio;
-                        }
-                        canvas.style.left = `${(width - canvas.width) / 2}px`;
-                        canvas.style.top = `${(height - canvas.height) / 2}px`;
-                        shader.resizeCanvas();
-                    }
-                    window.addEventListener('resize', resizeCanvas);
-                    resizeCanvas();
-
-                    async function render() {
-                        await hands.send({ image: video });
-                        shader.brightness = getBrightness(video);
-                        shader.render();
-                        requestAnimationFrame(render);
-                    }
-                    render();
-                });
-            } catch (error) {
-                console.error("Error accessing camera: ", error);
-            }
-        };
+            render();
+        } catch (error) {
+            console.error("Error accessing camera: ", error);
+        }
     </script>
 </head>
 
